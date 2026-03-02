@@ -1,0 +1,9 @@
+# requirements.txt
+torchaudio
+librosa
+scikit-learn
+soundfile
+numpy
+tqdm
+pathlib
+demucs

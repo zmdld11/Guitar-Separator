@@ -1,0 +1,48 @@
+# .gitignore
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Data and models
+data/
+model/
+rec_model/checkpoint
+sep_model/checkpoint
+music/
+output/
+separated_tracks/
+*.pkl
+*.pth
+*.zip
+*.gz
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+.venv
+
+# documents
+code_documentation.md
+generate_markdown.py
