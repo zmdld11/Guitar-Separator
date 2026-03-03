@@ -1,87 +1,74 @@
-# src/sep/config.py
 import os
-import json
-import torch
+from dataclasses import dataclass
 
-class GuitarSeparationConfig:
-    """吉他分离模型配置"""
-    
-    # 路径配置
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    DATA_DIR = os.path.join(BASE_DIR, "data")
-    MODEL_DIR = os.path.join(BASE_DIR, "sep_model")
-    OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-    REC_MODEL_DIR = os.path.join(BASE_DIR, "rec_model")
-    
-    # 提取后的数据集路径
-    EXTRACT_DIR = os.path.join(DATA_DIR, "extract")
-    DATASET_JSON = os.path.join(EXTRACT_DIR, "separation", "dataset.json")
-    DATASET_STATS = os.path.join(EXTRACT_DIR, "dataset_stats.json")
-    
-    # 音频处理配置 - 使用更简单的参数确保形状匹配
-    SAMPLE_RATE = 22050  # 保持一致的采样率
-    DURATION = 2.0  # 减少到2秒，确保能被2整除多次
-    HOP_LENGTH = 512
-    N_FFT = 1024
-    N_MELS = 64
-    N_CHANNELS = 2  # 立体声
-    
-    # 训练配置
-    BATCH_SIZE = 1  # 使用batch size 1以避免形状问题
-    EPOCHS = 30  # 减少训练轮数
-    LEARNING_RATE = 1e-4
-    GRADIENT_ACCUMULATION_STEPS = 1  # 不使用梯度累积
-    VALIDATION_SPLIT = 0.1
-    TEST_SPLIT = 0.1
-    
-    # 模型配置
-    HIDDEN_SIZE = 32
-    NUM_ENCODERS = 3
-    NUM_TRANSFORMER_LAYERS = 0  # 不使用Transformer
-    NUM_HEADS = 4
-    DROPOUT_RATE = 0.1
-    
-    # 训练策略
-    USE_AMP = False  # 暂时禁用混合精度训练以简化问题
-    USE_GRADIENT_CLIPPING = True
-    GRADIENT_CLIP_VALUE = 1.0
-    WEIGHT_DECAY = 1e-5
-    WARMUP_STEPS = 500
-    
-    # 数据增强
-    USE_AUGMENTATION = False  # 暂时禁用数据增强
-    AUGMENT_PROB = 0.0
-    TIME_MASK_PROB = 0.0
-    FREQ_MASK_PROB = 0.0
-    GAIN_RANGE = (-3, 3)
-    
-    @classmethod
-    def create_directories(cls):
-        """创建必要的目录"""
-        directories = [cls.MODEL_DIR, cls.OUTPUT_DIR]
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
-            print(f"📁 目录已创建: {directory}")
-        
-        # 在模型目录下创建子目录
-        os.makedirs(os.path.join(cls.MODEL_DIR, "checkpoints"), exist_ok=True)
-        os.makedirs(os.path.join(cls.MODEL_DIR, "logs"), exist_ok=True)
-        os.makedirs(os.path.join(cls.MODEL_DIR, "tensorboard"), exist_ok=True)
-    
-    @classmethod
-    def get_device(cls):
-        """获取训练设备"""
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
-            print(f"🎮 使用GPU: {torch.cuda.get_device_name(0)}")
-            print(f"🎮 GPU内存: {gpu_memory:.2f} GB")
-            
-            # 设置CUDA内存优化
-            torch.cuda.empty_cache()
-            
-        else:
-            device = torch.device('cpu')
-            print("🖥️  使用CPU")
-            
-        return device
+@dataclass
+class Config:
+    # ---------- 路径配置 ----------
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+    data_root = os.path.join(project_root, 'data/extract')
+    mix_dir = os.path.join(data_root, 'separation/mix_segments')
+    guitar_dir = os.path.join(data_root, 'separation/guitar_segments')
+    checkpoint_dir = os.path.join(project_root, 'sep_model/checkpoints')
+    log_dir = os.path.join(project_root, 'sep_model/logs')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+
+    # ---------- 音频参数 ----------
+    sample_rate = 44100
+    duration = 6.0                     # 训练片段长度（秒）
+    n_samples = int(sample_rate * duration)
+
+    # ---------- STFT 参数（频域分支） ----------
+    stft_fft_size = 4096
+    stft_hop_length = 1024
+    stft_win_length = 4096
+    stft_normalized = False
+    stft_window = 'hann'
+
+    # ---------- 模型结构参数 ----------
+    # 时域分支
+    time_channels = 64                  # 初始通道数
+    time_depth = 5                      # 编码器层数（不包括共享层）
+    time_kernel_size = 8
+    time_stride = 4
+
+    # 频域分支
+    freq_channels = 64
+    freq_depth = 5
+    freq_kernel_size = (8, 4)           # (时间方向, 频率方向) 卷积核
+    freq_stride = (4, 4)                 # (时间, 频率) 步长
+
+    # 共享层
+    shared_channels = 128
+    shared_depth = 1                     # 额外共享层数（每层下采样2倍）
+    shared_kernel_size = 4
+
+    # Transformer 参数（最底层）
+    transformer_dim = 512                 # 与最底层通道数一致
+    transformer_heads = 8
+    transformer_layers = 4
+    transformer_dropout = 0.1
+
+    # 扩散模块参数（可选）
+    use_diffusion = True
+    diffusion_steps = 100                 # 训练时使用的扩散步数（DDPM）
+    diffusion_beta_start = 1e-4
+    diffusion_beta_end = 0.02
+    diffusion_dim = transformer_dim       # 扩散网络隐藏维度
+
+    # ---------- 训练参数 ----------
+    batch_size = 4                         # 根据实际GPU调整
+    num_workers = 8
+    epochs = 300
+    learning_rate = 3e-4
+    weight_decay = 0.0
+    gradient_clip = 5.0
+    accumulate_grad_batches = 2            # 梯度累积（等效batch_size = batch_size * accumulate）
+    use_amp = True                          # 混合精度训练
+    save_top_k = 3
+    monitor_metric = 'val_sdr'              # 监控验证SDR
+    monitor_mode = 'max'
+
+    # 验证集比例
+    val_ratio = 0.1
+    seed = 42
