@@ -6,17 +6,23 @@ from mir_eval.separation import bss_eval_sources
 def compute_sdr(estimated, target):
     """
     计算单通道SDR（信号失真比）
-    estimated, target: (1, T) 或 (T,)
+    estimated, target: 形状为 (batch, 1, T) 或 (1, T)
     """
-    if estimated.dim() == 2:
-        estimated = estimated.squeeze(0).cpu().numpy()
-        target = target.squeeze(0).cpu().numpy()
+    # 将张量转为 numpy 并压缩所有为1的维度
+    estimated = estimated.cpu().detach().numpy().squeeze()
+    target = target.cpu().detach().numpy().squeeze()
+    
+    # 确保形状为 (1, T)
+    if estimated.ndim == 1:
+        estimated = estimated[np.newaxis, :]
+        target = target[np.newaxis, :]
+    elif estimated.ndim == 2 and estimated.shape[0] == 1:
+        pass  # 已经是 (1, T)
     else:
-        estimated = estimated.cpu().numpy()
-        target = target.cpu().numpy()
-
+        raise ValueError(f"Unexpected shape: {estimated.shape}")
+    
     # mir_eval 要求形状 (nsrc, nsample)
-    sdr, sir, sar, _ = bss_eval_sources(target[np.newaxis, :], estimated[np.newaxis, :])
+    sdr, sir, sar, _ = bss_eval_sources(target, estimated)
     return float(sdr[0])
 
 def save_audio(waveform, path, sample_rate=44100):

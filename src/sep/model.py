@@ -22,7 +22,10 @@ class LayerScale(nn.Module):
         self.gamma = nn.Parameter(init * torch.ones(dim))
 
     def forward(self, x):
-        return self.gamma * x
+        # x shape: (batch, dim, time) 或 (batch, dim, time, freq)
+        # 将 gamma 重塑为 (1, dim, 1, 1...) 以匹配 x 的维度
+        gamma = self.gamma.view(1, -1, *([1] * (x.dim() - 2)))
+        return gamma * x
 
 class FreqPositionalEmbedding(nn.Module):
     """频率位置嵌入，用于频域分支"""
@@ -31,10 +34,14 @@ class FreqPositionalEmbedding(nn.Module):
         self.embed = nn.Embedding(max_freq, dim)
 
     def forward(self, x, freq_idx):
-        # x: (batch, time, freq, ch)
-        # freq_idx: (freq,) 或 (batch, freq)
-        pos = self.embed(freq_idx)  # (freq, dim) or (batch, freq, dim)
-        return x + pos.unsqueeze(1)  # 加到频率维度
+        # x 实际传入形状: (batch, ch, time, freq)
+        # 需要转换为 (batch, time, freq, ch) 以添加位置嵌入
+        x = x.permute(0, 2, 3, 1)          # (batch, time, freq, ch)
+        pos = self.embed(freq_idx)         # (freq, ch)
+        pos = pos.unsqueeze(0).unsqueeze(0) # (1, 1, freq, ch)
+        x = x + pos                         # 广播到 (batch, time, freq, ch)
+        x = x.permute(0, 3, 1, 2)           # 转回 (batch, ch, time, freq)
+        return x
 
 # ---------- 残差块（带扩张卷积和局部注意力） ----------
 class ResidualBlock(nn.Module):
@@ -164,9 +171,13 @@ class DecoderLayer(nn.Module):
         self.conv2 = nn.Conv1d(out_channels, out_channels, 1)
 
     def forward(self, x, skip=None):
-        # x: (b, in_ch, t)
+        # x: (batch, in_ch, t)
         if skip is not None and self.skip_conv is not None:
-            skip = self.skip_conv(skip)   # (b, out_ch, t)
+            skip = self.skip_conv(skip)   # (batch, out_ch, t_skip)
+            # 对齐时间长度：裁剪到较小的长度
+            min_len = min(x.size(2), skip.size(2))
+            x = x[:, :, :min_len]
+            skip = skip[:, :, :min_len]
             x = torch.cat([x, skip], dim=1)
         x = self.conv1(x)                  # (b, out_ch*2, t)
         x = self.glu(x)                     # (b, out_ch, t)
@@ -193,12 +204,17 @@ class FreqDecoderLayer(nn.Module):
         self.conv2 = nn.Conv2d(out_channels, out_channels, 1)
 
     def forward(self, x, skip=None):
-        # x: (b, in_ch, t, f)
+        # x: (batch, in_ch, t, f)
         if skip is not None and self.skip_conv is not None:
-            skip = self.skip_conv(skip)
+            skip = self.skip_conv(skip)   # (batch, out_ch, t_skip, f_skip)
+            # 对齐时间和频率维度
+            min_t = min(x.size(2), skip.size(2))
+            min_f = min(x.size(3), skip.size(3))
+            x = x[:, :, :min_t, :min_f]
+            skip = skip[:, :, :min_t, :min_f]
             x = torch.cat([x, skip], dim=1)
-        x = self.conv1(x)
         # GLU 在通道维
+        x = self.conv1(x)
         a, b = x.chunk(2, dim=1)
         x = a * torch.sigmoid(b)
         x = self.deconv(x)
@@ -289,13 +305,15 @@ class DiffusionModule(nn.Module):
 
     def forward_train(self, x, t):
         """
-        x: 干净特征 (..., dim)
-        t: 时间步 (batch,)
-        返回预测的噪声
+        x: 干净特征，形状 (batch, seq_len, dim) 或 (batch, dim)
+        t: 时间步，形状 (batch,)
+        返回预测的噪声和真实噪声
         """
-        # 添加噪声
         noise = torch.randn_like(x)
-        noisy = self.sqrt_alphas_cumprod[t] * x + self.sqrt_one_minus_alphas_cumprod[t] * noise
+        # 将系数 reshape 以匹配 x 的维度
+        alpha_cumprod = self.sqrt_alphas_cumprod[t].view(-1, *([1] * (x.dim() - 1)))
+        one_minus_alpha_cumprod = self.sqrt_one_minus_alphas_cumprod[t].view(-1, *([1] * (x.dim() - 1)))
+        noisy = alpha_cumprod * x + one_minus_alpha_cumprod * noise
         pred_noise = self.net(noisy)
         return pred_noise, noise
 
@@ -373,8 +391,8 @@ class HybridDemucsWithDiffusion(nn.Module):
         self.freq_encoders = nn.ModuleList(freq_encoders)
         self.freq_encoder_out_ch = in_ch_f
 
-        # 频率位置嵌入（在第一个频域编码层后使用）
-        self.freq_pos = FreqPositionalEmbedding(in_ch_f)
+        # 频率位置嵌入，维度应与第一个频域编码层的输出通道数一致
+        self.freq_pos = FreqPositionalEmbedding(config.freq_channels)
 
         # ---------- 共享编码层 ----------
         self.shared_encoder = nn.ModuleList()
@@ -559,18 +577,35 @@ class HybridDemucsWithDiffusion(nn.Module):
             skip = freq_skips[-(i+1)]
             f_dec = dec(f_dec, skip)
         spec_out = self.freq_out(f_dec)  # (b, 2, t, f)
+
+        # 确保频率维度正确（应为 n_fft/2+1）
+        expected_freq = self.config.stft_fft_size // 2 + 1
+        if spec_out.size(3) != expected_freq:
+            spec_out = F.interpolate(spec_out, size=(spec_out.size(2), expected_freq), 
+                                    mode='bilinear', align_corners=False)
+            
         # 通过 ISTFT 还原波形
         # 注意：需要知道原始长度，可能需要对spec进行长度调整
         waveform_length = waveform.size(2)
         freq_out = istft(spec_out,
-                         fft_size=self.config.stft_fft_size,
-                         hop_length=self.config.stft_hop_length,
-                         win_length=self.config.stft_win_length,
-                         window=self.config.stft_window,
-                         normalized=self.config.stft_normalized,
-                         length=waveform_length)  # (b, 1, T)
+                        fft_size=self.config.stft_fft_size,
+                        hop_length=self.config.stft_hop_length,
+                        win_length=self.config.stft_win_length,
+                        window=self.config.stft_window,
+                        normalized=self.config.stft_normalized)  # 不指定长度，让istft自动计算
+        # 自动计算的长度可能与原始长度不同，需要对齐
+        if freq_out.size(2) > waveform_length:
+            freq_out = freq_out[:, :, :waveform_length]  # 裁剪
+        elif freq_out.size(2) < waveform_length:
+            # 填充零
+            pad = waveform_length - freq_out.size(2)
+            freq_out = torch.nn.functional.pad(freq_out, (0, pad))
 
-        # 融合两个分支的输出（论文中直接求和）
+        # 融合两个分支的输出
+        # 对齐时间维度
+        min_len = min(time_out.size(2), freq_out.size(2))
+        time_out = time_out[:, :, :min_len]
+        freq_out = freq_out[:, :, :min_len]
         final_wave = time_out + freq_out
 
         if diffusion_loss is not None:
