@@ -25,7 +25,7 @@ class Config:
     stft_normalized = False
     stft_window = 'hann'
 
-    # ---------- 模型结构参数 ----------
+    # ---------- 模型结构参数（HT Demucs风格） ----------
     # 时域分支
     time_channels = 64                  # 初始通道数
     time_depth = 5                      # 编码器层数（不包括共享层）
@@ -38,7 +38,7 @@ class Config:
     freq_kernel_size = (8, 4)           # (时间方向, 频率方向) 卷积核
     freq_stride = (4, 4)                 # (时间, 频率) 步长
 
-    # 共享层
+    # 共享层（Transformer 之前的额外下采样）
     shared_channels = 128
     shared_depth = 1                     # 额外共享层数（每层下采样2倍）
     shared_kernel_size = 4
@@ -49,26 +49,28 @@ class Config:
     transformer_layers = 4
     transformer_dropout = 0.1
 
-    # 扩散模块参数（可选）
-    use_diffusion = True
-    diffusion_steps = 100                 # 训练时使用的扩散步数（DDPM）
-    diffusion_beta_start = 1e-4
-    diffusion_beta_end = 0.02
-    diffusion_dim = transformer_dim       # 扩散网络隐藏维度
+    # 输出方式：使用复数掩码 (CaC)
+    # 训练时使用多分辨率STFT损失
 
     # ---------- 训练参数 ----------
-    batch_size = 4                         # 根据实际GPU调整
+    batch_size = 4                         # 根据GPU调整
     num_workers = 8
     epochs = 300
     learning_rate = 3e-4
     weight_decay = 0.0
     gradient_clip = 5.0
-    accumulate_grad_batches = 2            # 梯度累积（等效batch_size = batch_size * accumulate）
+    accumulate_grad_batches = 2            # 梯度累积
     use_amp = True                          # 混合精度训练
     save_top_k = 3
-    monitor_metric = 'val_sdr'              # 监控验证SDR
+    monitor_metric = 'val_sdr'
     monitor_mode = 'max'
 
     # 验证集比例
     val_ratio = 0.1
     seed = 42
+
+    # 数据增强
+    use_augmentation = True
+    gain_augment_range = [0.7, 1.3]         # 随机增益范围
+    channel_swap_prob = 0.2                  # 立体声通道交换概率
+    noise_floor = 1e-5                       # 添加极小噪声
