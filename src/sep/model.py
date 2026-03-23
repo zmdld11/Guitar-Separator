@@ -103,10 +103,14 @@ class EncoderLayer(nn.Module):
         super().__init__()
         self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, stride,
                               padding=(kernel_size - stride)//2)
+        self.norm = nn.GroupNorm(1, out_channels)
+        self.act = nn.GELU()
         self.residual = ResidualBlock(out_channels, dilation, use_lstm, use_attn)
 
     def forward(self, x):
         x = self.conv(x)
+        x = self.norm(x)
+        x = self.act(x)
         x = self.residual(x)
         return x
 
@@ -121,10 +125,14 @@ class FreqEncoderLayer(nn.Module):
                               kernel_size=(time_ks, freq_ks),
                               stride=(1, freq_s),
                               padding=(time_ks//2, (freq_ks - freq_s)//2))
+        self.norm = nn.GroupNorm(1, out_channels)
+        self.act = nn.GELU()
         self.residual = ResidualBlock(out_channels, dilation, use_lstm, use_attn)
 
     def forward(self, x):
         x = self.conv(x)                     # (b, out_ch, t, f)
+        x = self.norm(x)
+        x = self.act(x)
         b, c, t, f = x.shape
         x = x.permute(0, 3, 1, 2).contiguous()  # (b, f, c, t)
         x = x.view(-1, c, t)                  # (b*f, c, t)
@@ -223,11 +231,15 @@ def rescale_module(module, reference=1.0):
     """权重重缩放,使每层输出的方差接近1"""
     for sub in module.modules():
         if isinstance(sub, (nn.Conv1d, nn.Conv2d, nn.ConvTranspose1d, nn.ConvTranspose2d)):
-            std = sub.weight.std().detach()
-            scale = (reference / std).clamp_(0.1, 10.0)
-            sub.weight.data.mul_(scale)
-            if sub.bias is not None:
-                sub.bias.data.mul_(scale)
+            if sub.weight.numel() > 1:
+                std = sub.weight.std().detach()
+            else:
+                std = torch.tensor(1.0, device=sub.weight.device)
+            if std > 0:
+                scale = (reference / std).clamp_(0.1, 10.0)
+                sub.weight.data.mul_(scale)
+                if sub.bias is not None:
+                    sub.bias.data.mul_(scale)
 
 class HTDemucs(nn.Module):
     """HT Demucs v4 风格模型(无扩散,注入式融合,直接相加skip)"""
@@ -353,8 +365,8 @@ class HTDemucs(nn.Module):
             dec_in_ch_f = out_ch
         self.freq_out = nn.Conv2d(dec_in_ch_f, 2, 1)   # 输出 mask (实/虚)
 
-        # 权重重缩放
-        self.apply(lambda m: rescale_module(m, reference=1.0) if hasattr(m, 'weight') else None)
+        # 权重重缩放 (删除原有的导致爆炸的rescale逻辑)
+        # self.apply(lambda m: rescale_module(m, reference=1.0) if hasattr(m, 'weight') else None)
 
     def forward(self, waveform):
         """
