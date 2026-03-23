@@ -15,21 +15,20 @@ class SepDataset(Dataset):
         self.sample_rate = config.sample_rate
         self.n_samples = config.n_samples
 
-        # 定义 Linux 上的数据根目录（根据你的实际路径调整）
-        # 这里假设数据存放在 /root/autodl-tmp/4ATS/data/extract
-        self.linux_data_root = "/root/autodl-tmp/4ATS/data/extract"
+        # 定义当前的本地数据根目录
+        self.local_data_root = os.path.abspath(config.data_root)
 
         # 加载数据集索引文件
         dataset_json = os.path.join(config.data_root, 'separation/dataset.json')
         with open(dataset_json, 'r') as f:
             all_items = json.load(f)   # 列表，每个元素为 {"input": path, "target": path}
 
-        # 将 Windows 路径转换为 Linux 路径
+        # 将路径转换为当前系统路径
         converted_items = []
         for item in all_items:
             converted_item = {
-                'input': self._convert_windows_path(item['input']),
-                'target': self._convert_windows_path(item['target'])
+                'input': self._convert_path(item['input']),
+                'target': self._convert_path(item['target'])
             }
             converted_items.append(converted_item)
 
@@ -42,19 +41,16 @@ class SepDataset(Dataset):
         else:
             self.items = converted_items[:val_size]
 
-    def _convert_windows_path(self, win_path):
-        """将 Windows 路径转换为 Linux 路径"""
-        # 替换反斜杠为正斜杠
-        linux_path = win_path.replace('\\', '/')
-        # 如果路径以 Windows 盘符开头，替换为 Linux 数据根目录
-        # 假设路径格式为 D:/program_project/4ATS/instrument_separator/data/extract/...
-        if 'D:/program_project/4ATS/instrument_separator/data/extract' in linux_path:
-            # 提取 'data/extract' 之后的部分
-            rel_path = linux_path.split('data/extract')[-1].lstrip('/')
-            return os.path.join(self.linux_data_root, rel_path)
+    def _convert_path(self, origin_path):
+        """将 JSON 中的路径转换为当前本机的绝对路径"""
+        # 统一替换斜杠风格
+        std_path = origin_path.replace('\\', '/')
+        # 如果路径里包含 'data/extract'，将其分割替换到当前的本地根目录
+        if 'data/extract' in std_path:
+            rel_path = std_path.split('data/extract')[-1].lstrip('/')
+            return os.path.join(self.local_data_root, rel_path)
         else:
-            # 如果不是预期的格式，则原样返回（可能已经是正确路径）
-            return linux_path
+            return origin_path
 
     def __len__(self):
         return len(self.items)

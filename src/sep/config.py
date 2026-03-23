@@ -15,20 +15,20 @@ class Config:
 
     # ---------- 音频参数 ----------
     sample_rate = 44100
-    duration = 6.0                     # 训练片段长度（秒）
+    duration = 6.0                     # 训练片段长度(秒)
     n_samples = int(sample_rate * duration)
 
-    # ---------- STFT 参数（频域分支） ----------
-    stft_fft_size = 4096
-    stft_hop_length = 1024
-    stft_win_length = 4096
+    # ---------- STFT 参数(频域分支) ----------
+    stft_fft_size = 2048               # 使用2048以获得更好的COLA
+    stft_hop_length = 512              # 4倍overlap
+    stft_win_length = 2048
     stft_normalized = False
     stft_window = 'hann'
 
-    # ---------- 模型结构参数（HT Demucs风格） ----------
+    # ---------- 模型结构参数(HT Demucs风格) ----------
     # 时域分支
     time_channels = 64                  # 初始通道数
-    time_depth = 5                      # 编码器层数（不包括共享层）
+    time_depth = 5                      # 编码器层数(不包括共享层)
     time_kernel_size = 8
     time_stride = 4
 
@@ -38,18 +38,18 @@ class Config:
     freq_kernel_size = (8, 4)           # (时间方向, 频率方向) 卷积核
     freq_stride = (4, 4)                 # (时间, 频率) 步长
 
-    # 共享层（Transformer 之前的额外下采样）
+    # 共享层(Transformer 之前的额外下采样)
     shared_channels = 128
-    shared_depth = 1                     # 额外共享层数（每层下采样2倍）
+    shared_depth = 1                     # 额外共享层数(每层下采样2倍)
     shared_kernel_size = 4
 
-    # Transformer 参数（最底层）
+    # Transformer 参数(最底层)
     transformer_dim = 512                 # 与最底层通道数一致
     transformer_heads = 8
     transformer_layers = 4
     transformer_dropout = 0.1
 
-    # 输出方式：使用复数掩码 (CaC)
+    # 输出方式:使用复数掩码 (CaC)
     # 训练时使用多分辨率STFT损失
 
     # ---------- 训练参数 ----------

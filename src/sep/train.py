@@ -1,5 +1,10 @@
-import os
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)  # 忽略用户警告
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -28,13 +33,11 @@ def multi_resolution_stft_loss(est_wave, target_wave, fft_sizes=[2048, 1024, 512
         win_sizes = fft_sizes
     loss = 0.0
     for fft_size, hop_size, win_size in zip(fft_sizes, hop_sizes, win_sizes):
-        # 计算STFT
         window = torch.hann_window(win_size).to(est_wave.device)
         est_spec = torch.stft(est_wave.squeeze(1), n_fft=fft_size, hop_length=hop_size,
                               win_length=win_size, window=window, return_complex=True)
         target_spec = torch.stft(target_wave.squeeze(1), n_fft=fft_size, hop_length=hop_size,
                                  win_length=win_size, window=window, return_complex=True)
-        # 实部虚部分别L1
         loss += torch.mean(torch.abs(est_spec.real - target_spec.real)) + \
                 torch.mean(torch.abs(est_spec.imag - target_spec.imag))
     return loss / len(fft_sizes)
@@ -84,7 +87,7 @@ def train():
     optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=1e-6)
 
-    # 损失函数：多分辨率STFT损失 + L1波形损失（权重可调）
+    # 损失函数
     l1_loss = nn.L1Loss()
 
     # 混合精度
@@ -94,19 +97,16 @@ def train():
     nan_counter = 0
     max_nan_epochs = 5
 
-    # ---------- 数据增强函数 ----------
+    # 数据增强函数
     def augment(mix, guitar):
         if not config.use_augmentation:
             return mix, guitar
-        # 随机增益
         gain = random.uniform(*config.gain_augment_range)
         mix = mix * gain
         guitar = guitar * gain
-        # 立体声通道交换（如果立体声）
         if mix.size(1) > 1 and random.random() < config.channel_swap_prob:
             mix = torch.flip(mix, dims=[1])
             guitar = torch.flip(guitar, dims=[1])
-        # 添加极小噪声（防止静音段全零）
         noise = torch.randn_like(mix) * config.noise_floor
         mix = mix + noise
         guitar = guitar + noise
@@ -123,10 +123,8 @@ def train():
             mix = mix.to(device)
             guitar = guitar.to(device)
 
-            # 数据增强
             mix, guitar = augment(mix, guitar)
 
-            # 检查NaN
             if torch.isnan(mix).any() or torch.isnan(guitar).any():
                 log_message(f"⚠️ Batch {batch_idx} contains NaN in input, skipping", also_print=False)
                 nan_batches += 1
@@ -138,7 +136,7 @@ def train():
                 out = model(mix)
                 loss_l1 = l1_loss(out, guitar)
                 loss_stft = multi_resolution_stft_loss(out, guitar)
-                loss = loss_l1 + 0.5 * loss_stft  # 调整权重
+                loss = loss_l1 + 0.5 * loss_stft
 
             if torch.isnan(loss).any():
                 log_message(f"⚠️ Batch {batch_idx} loss is NaN, skipping", also_print=False)
@@ -196,7 +194,7 @@ def train():
             val_sdr = -float('inf')
             log_message(f'Epoch {epoch}: No valid SDR values')
 
-        scheduler.step()  # 余弦退火每个epoch步进
+        scheduler.step()
 
         if val_sdr > best_val_sdr:
             best_val_sdr = val_sdr
