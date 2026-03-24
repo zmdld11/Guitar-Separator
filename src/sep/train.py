@@ -10,7 +10,6 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.amp
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 import numpy as np
 from datetime import datetime
@@ -32,6 +31,11 @@ def multi_resolution_stft_loss(est_wave, target_wave, fft_sizes=[2048, 1024, 512
     if win_sizes is None:
         win_sizes = fft_sizes
     loss = 0.0
+    
+    # 强制在FP32下进行STFT计算，防止AMP混合精度下的溢出
+    est_wave = est_wave.float()
+    target_wave = target_wave.float()
+    
     for fft_size, hop_size, win_size in zip(fft_sizes, hop_sizes, win_sizes):
         window = torch.hann_window(win_size).to(est_wave.device)
         est_spec = torch.stft(est_wave.squeeze(1), n_fft=fft_size, hop_length=hop_size,
@@ -112,7 +116,31 @@ def train():
         guitar = guitar + noise
         return mix, guitar
 
-    for epoch in range(1, config.epochs + 1):
+    start_epoch = 1
+
+    # 断点续训逻辑
+    if hasattr(config, 'resume_training') and config.resume_training:
+        checkpoint_path = config.resume_checkpoint if getattr(config, 'resume_checkpoint', '') else os.path.join(config.checkpoint_dir, 'last_checkpoint.pth')
+        if os.path.exists(checkpoint_path):
+            log_message(f"Loading checkpoint from {checkpoint_path}...")
+            try:
+                # 明确指定 weights_only=False 静音 FutureWarning (本地模型安全)
+                checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if 'scheduler_state_dict' in checkpoint and scheduler is not None:
+                    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                start_epoch = checkpoint.get('epoch', 0) + 1
+                best_val_sdr = checkpoint.get('best_val_sdr', checkpoint.get('val_sdr', -float('inf')))
+                if 'scaler_state_dict' in checkpoint and scaler is not None:
+                    scaler.load_state_dict(checkpoint['scaler_state_dict'])
+                log_message(f"Successfully resumed training from epoch {start_epoch - 1}. Best SDR so far: {best_val_sdr:.2f}")
+            except Exception as e:
+                log_message(f"Failed to load checkpoint: {e}. Starting from scratch.")
+        else:
+            log_message(f"Checkpoint not found at {checkpoint_path}. Starting from scratch.")
+
+    for epoch in range(start_epoch, config.epochs + 1):
         model.train()
         train_loss = 0.0
         valid_batches = 0
@@ -178,7 +206,7 @@ def train():
                 if torch.isnan(mix).any() or torch.isnan(guitar).any():
                     continue
 
-                with autocast(enabled=config.use_amp):
+                with torch.amp.autocast('cuda', enabled=config.use_amp):
                     out = model(mix)
                 if torch.isnan(out).any():
                     continue
@@ -202,15 +230,24 @@ def train():
             log_message(f'New best model saved with SDR {val_sdr:.2f}')
             nan_counter = 0
 
-        if epoch % 50 == 0:
+        # 保存最新检查点，用于断点续训
+        last_checkpoint_path = os.path.join(config.checkpoint_dir, 'last_checkpoint.pth')
+        checkpoint_dict = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'scaler_state_dict': scaler.state_dict(),
+            'val_sdr': val_sdr,
+            'best_val_sdr': best_val_sdr,
+        }
+        torch.save(checkpoint_dict, last_checkpoint_path)
+
+        # 调高了定期保存的频率，并且使用拷贝方式
+        if epoch % 10 == 0:
             checkpoint_path = os.path.join(config.checkpoint_dir, f'checkpoint_epoch{epoch}.pth')
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'val_sdr': val_sdr,
-            }, checkpoint_path)
+            import shutil
+            shutil.copyfile(last_checkpoint_path, checkpoint_path)
             log_message(f'Checkpoint saved to {checkpoint_path}')
 
     log_message("=" * 60)

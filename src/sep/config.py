@@ -27,26 +27,26 @@ class Config:
 
     # ---------- 模型结构参数(HT Demucs风格) ----------
     # 时域分支
-    time_channels = 64                  # 初始通道数
-    time_depth = 5                      # 编码器层数(不包括共享层)
+    time_channels = 24                  # 【修改】从64降到24，大幅缩减参数量防过拟合
+    time_depth = 4                      # 【修改】从5降到4
     time_kernel_size = 8
     time_stride = 4
 
     # 频域分支
-    freq_channels = 64
-    freq_depth = 5
+    freq_channels = 24                  # 【修改】同上
+    freq_depth = 4                      # 【修改】同上
     freq_kernel_size = (8, 4)           # (时间方向, 频率方向) 卷积核
     freq_stride = (4, 4)                 # (时间, 频率) 步长
 
     # 共享层(Transformer 之前的额外下采样)
-    shared_channels = 128
+    shared_channels = 64                # 【修改】从128降到64
     shared_depth = 1                     # 额外共享层数(每层下采样2倍)
     shared_kernel_size = 4
 
     # Transformer 参数(最底层)
-    transformer_dim = 512                 # 与最底层通道数一致
-    transformer_heads = 8
-    transformer_layers = 4
+    transformer_dim = 256                 # 【修改】自注意力维度从512降到256
+    transformer_heads = 4                 # 【修改】头数从8降到4
+    transformer_layers = 2                # 【修改】层数从4降到2
     transformer_dropout = 0.1
 
     # 输出方式:使用复数掩码 (CaC)
@@ -74,3 +74,7 @@ class Config:
     gain_augment_range = [0.7, 1.3]         # 随机增益范围
     channel_swap_prob = 0.2                  # 立体声通道交换概率
     noise_floor = 1e-5                       # 添加极小噪声
+
+    # 断点续训参数
+    resume_training = True                   # 设为True时优先从上次断点恢复（设为False则重新开始）
+    resume_checkpoint = ""                   # 为空时默认找 last_checkpoint.pth，指定路径则加载该文件

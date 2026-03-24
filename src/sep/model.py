@@ -141,18 +141,17 @@ class FreqEncoderLayer(nn.Module):
         return x
 
 class DecoderLayer(nn.Module):
-    """时域解码层(上采样 + 跳跃连接相加)"""
+    """时域解码层(上采样 + 跳跃连接拼接)"""
     def __init__(self, in_channels, out_channels, kernel_size, stride, skip_channels=0):
         super().__init__()
         self.deconv = nn.ConvTranspose1d(in_channels, out_channels,
                                          kernel_size, stride,
                                          padding=(kernel_size - stride)//2,
                                          output_padding=stride-1)
-        # 添加通道投影层(如果skip通道数不匹配)
-        if skip_channels > 0 and skip_channels != out_channels:
-            self.skip_proj = nn.Conv1d(skip_channels, out_channels, 1)
-        else:
-            self.skip_proj = None
+        # 用 1x1 卷积将在 cat 后增加的通道压缩回 out_channels
+        self.mix_conv = nn.Conv1d(out_channels + skip_channels, out_channels, 1)
+        self.norm = nn.GroupNorm(1, out_channels)
+        self.act = nn.GELU()
         self.conv = nn.Conv1d(out_channels, out_channels, 1)
 
     def forward(self, x, skip=None):
@@ -162,10 +161,10 @@ class DecoderLayer(nn.Module):
             min_len = min(x.size(2), skip.size(2))
             x = x[:, :, :min_len]
             skip = skip[:, :, :min_len]
-            # 投影skip通道维度
-            if self.skip_proj is not None:
-                skip = self.skip_proj(skip)
-            x = x + skip   # 直接相加
+            x = torch.cat([x, skip], dim=1)   # 沿通道拼接而不是直接相加
+        x = self.mix_conv(x)
+        x = self.norm(x)
+        x = self.act(x)
         x = self.conv(x)
         return x
 
@@ -180,11 +179,10 @@ class FreqDecoderLayer(nn.Module):
                                          stride=(1, freq_s),
                                          padding=(time_ks//2, (freq_ks - freq_s)//2),
                                          output_padding=(0, freq_s-1))
-        # 添加通道投影层
-        if skip_channels > 0 and skip_channels != out_channels:
-            self.skip_proj = nn.Conv2d(skip_channels, out_channels, 1)
-        else:
-            self.skip_proj = None
+        # 用于将在 cat 后增加的通道压回 out_channels
+        self.mix_conv = nn.Conv2d(out_channels + skip_channels, out_channels, 1)
+        self.norm = nn.GroupNorm(1, out_channels)
+        self.act = nn.GELU()
         self.conv = nn.Conv2d(out_channels, out_channels, 1)
 
     def forward(self, x, skip=None):
@@ -195,10 +193,10 @@ class FreqDecoderLayer(nn.Module):
             min_f = min(x.size(3), skip.size(3))
             x = x[:, :, :min_t, :min_f]
             skip = skip[:, :, :min_t, :min_f]
-            # ��影skip通道维度
-            if self.skip_proj is not None:
-                skip = self.skip_proj(skip)
-            x = x + skip
+            x = torch.cat([x, skip], dim=1)
+        x = self.mix_conv(x)
+        x = self.norm(x)
+        x = self.act(x)
         x = self.conv(x)
         return x
 

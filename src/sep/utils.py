@@ -1,6 +1,7 @@
 import torch
 import torchaudio
 import numpy as np
+import warnings
 from mir_eval.separation import bss_eval_sources
 
 def compute_sdr(estimated, target):
@@ -22,7 +23,11 @@ def compute_sdr(estimated, target):
         raise ValueError(f"Unexpected shape: {estimated.shape}")
     
     # mir_eval 要求形状 (nsrc, nsample)
-    sdr, sir, sar, _ = bss_eval_sources(target, estimated)
+    # 屏蔽 bss_eval_sources 即将在 0.9 版本移除的警告
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=FutureWarning)
+        sdr, sir, sar, _ = bss_eval_sources(target, estimated)
+        
     return float(sdr[0])
 
 def save_audio(waveform, path, sample_rate=44100):

@@ -1,0 +1,54 @@
+============================================================
+Training started at 2026-03-23 19:32:53
+============================================================
+Configuration:
+============================================================
+Using device: cuda
+Train samples: 412, Val samples: 45
+Model parameters: 52.72M
+Epoch 1: Train Loss = 2.5763
+Epoch 1: Val SDR = -30.95 dB
+New best model saved with SDR -30.95
+Epoch 2: Train Loss = 2.4060
+Epoch 2: Val SDR = -29.98 dB
+New best model saved with SDR -29.98
+Epoch 3: Train Loss = 2.2501
+Epoch 3: Val SDR = -30.72 dB
+Epoch 4: Train Loss = 2.1164
+Epoch 4: Val SDR = -30.16 dB
+Epoch 5: Train Loss = 1.9928
+Epoch 5: Val SDR = -30.28 dB
+Epoch 6: Train Loss = 1.8644
+Epoch 6: Val SDR = -30.66 dB
+Epoch 7: Train Loss = 1.7595
+Epoch 7: Val SDR = -30.78 dB
+Epoch 8: Train Loss = 1.6454
+Epoch 8: Val SDR = -29.88 dB
+New best model saved with SDR -29.88
+Epoch 9: Train Loss = 1.5415
+Epoch 9: Val SDR = -29.85 dB
+New best model saved with SDR -29.85
+Epoch 10: Train Loss = 1.4474
+Epoch 10: Val SDR = -28.79 dB
+New best model saved with SDR -28.79
+Epoch 11: Train Loss = 1.3407
+Epoch 11: Val SDR = -30.24 dB
+Epoch 12: Train Loss = 1.2471
+Epoch 12: Val SDR = -29.98 dB
+Epoch 13: Train Loss = 1.1656
+Epoch 13: Val SDR = -28.66 dB
+New best model saved with SDR -28.66
+Epoch 14: Train Loss = 1.0952
+Epoch 14: Val SDR = -28.00 dB
+New best model saved with SDR -28.00
+Epoch 15: Train Loss = 1.0149
+Epoch 15: Val SDR = -27.36 dB
+New best model saved with SDR -27.36
+Epoch 16: Train Loss = 0.9306
+Epoch 16: Val SDR = -26.92 dB
+New best model saved with SDR -26.92
+Epoch 17: Train Loss = 0.8532
+Epoch 17: Val SDR = -26.97 dB
+Epoch 18: Train Loss = 0.7817
+Epoch 18: Val SDR = -25.12 dB
+New best model saved with SDR -25.12
