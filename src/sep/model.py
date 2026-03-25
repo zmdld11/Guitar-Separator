@@ -56,6 +56,33 @@ class TemporalBottleneck(nn.Module):
         x3 = self.act(self.dilated3(x2))
         return res + x3    
 
+class FrequencySharedBiLSTM(nn.Module):
+    """
+    频带共享双向LSTM：将频率轴和Batch轴融合，让LSTM纯粹沿着时间T轴滑动，
+    以无限长的时间感受野捕捉吉他延音。由于同一层LSTM权重在所有频带上共享，
+    参数量极小，但对时序的理解能力远超普通2D卷积。
+    """
+    def __init__(self, channels, hidden_size=64):
+        super().__init__()
+        self.lstm = nn.LSTM(channels, hidden_size, num_layers=1, bidirectional=True, batch_first=True)
+        self.proj = nn.Conv2d(hidden_size * 2, channels, kernel_size=1)
+        
+    def forward(self, x):
+        # x: (B, C, F, T)
+        B, C, F, T = x.size()
+        
+        # 融合 B 和 F: 这里必须把 T 放在时序维度 -> (B*F, T, C)
+        x_seq = x.permute(0, 2, 3, 1).contiguous().view(B*F, T, C)
+        
+        # LSTM 处理 (batch_first=True, 所以输入形状正是 [B*F, T, input_size])
+        lstm_out, _ = self.lstm(x_seq)
+        
+        # 恢复维度: (B*F, T, 2*H) -> (B, F, T, 2*H) -> (B, 2*H, F, T)
+        lstm_out = lstm_out.view(B, F, T, -1).permute(0, 3, 1, 2).contiguous()
+        
+        # 投影回原通道数并结合残差
+        return x + self.proj(lstm_out)
+
 class Down(nn.Module):
     """ 下采样：Maxpool -> DoubleConv """
     def __init__(self, in_channels, out_channels):
@@ -87,12 +114,10 @@ class Up(nn.Module):
 
 class HTDemucs(nn.Module):
     """
-    [V3.0 破壳版] - Complex-Aware & Phase-Correction U-Net
-    - 绝不仅仅只预测幅度(Mask)，还要预测相位的偏移量 (Phase Delta)！
-    - 这是真正能解决混音和原声相位不合导致负SDR终极瓶颈的高级解法。
-    - 网络输出2个通道:
-       1) Mag Mask (Sigmoid) 用来过滤幅度
-       2) Phase Delta (Tanh*PI) 用来给原相加上修正量旋转回目标相位
+    [V4.0 定海神针版] - Frequency-Shared BiLSTM + Phase Correction
+    - 结合了3.0的相位修正能力和无限长时序分析能力。
+    - 引入基于频带共享的BiLSTM，突破2D卷积池化在时间上的局部性，
+      让模型拥有全局视野，彻底看清楚一整首曲子的音符起落。
     """
     def __init__(self, config: Config):
         super().__init__()
@@ -109,6 +134,7 @@ class HTDemucs(nn.Module):
         
         # 核心增强：时间膨胀模块，加深极低抽象层的时态理解
         self.bottleneck = TemporalBottleneck(c*16)
+        self.lstm_bottleneck = FrequencySharedBiLSTM(c*16)
         
         self.up1 = Up(c*16 + c*8, c*8)
         self.up2 = Up(c*8 + c*4, c*4)
@@ -152,6 +178,7 @@ class HTDemucs(nn.Module):
         x5 = self.down4(x4)
         
         x5 = self.bottleneck(x5)
+        x5 = self.lstm_bottleneck(x5)
         
         x = self.up1(x5, x4)
         x = self.up2(x, x3)
