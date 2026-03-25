@@ -24,39 +24,55 @@ from src.rec.model import SimplifiedGuitarClassifier, AdvancedGuitarClassifier, 
 class GuitarTimelineAnalyzer:
     """吉他时间线分析器"""
     
-    def __init__(self, model_path=None, device=None, model_type='advanced'):
+    def __init__(self, model_path=None, device=None, model_type=None):
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
         
-        self.model_type = model_type
-        
-        # 加载模型
+        # 加载模型路径
         if model_path is None:
             model_path = os.path.join(GuitarRecConfig.MODEL_DIR, "best_model.pth")
-        
-        # 根据模型类型创建模型
-        if model_type == 'advanced':
-            self.model = AdvancedGuitarClassifier().to(self.device)
-        elif model_type == 'standard':
-            self.model = GuitarClassifier().to(self.device)
-        else:
-            self.model = SimplifiedGuitarClassifier().to(self.device)
-        
-        self.load_model(model_path)
-        self.model.eval()
-        
-        print(f"🎸 吉他时间线分析器初始化完成，使用设备: {self.device}, 模型类型: {model_type}")
-    
-    def load_model(self, model_path):
-        """加载模型"""
+            
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
+            
+        # 先读取 checkpoint，动态判断模型架构 (这样 test 脚本就不需要手动指定模型结构了！)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         
-        checkpoint = torch.load(model_path, map_location=self.device)
+        if 'config' in checkpoint and 'model_type' in checkpoint['config']:
+            loaded_model_type = checkpoint['config']['model_type']
+            print(f"🔍 从权重中读取到模型架构: {loaded_model_type}")
+            if model_type is not None and model_type != loaded_model_type:
+                print(f"⚠️ 警告: 传入的 model_type ({model_type}) 与权重记录 ({loaded_model_type}) 不符，强制使用权重记录的架构！")
+            self.model_type = loaded_model_type
+            
+            # 读取特征输入形状
+            input_shape = checkpoint['config'].get('input_shape', GuitarRecConfig.INPUT_SHAPE)
+        else:
+            print("⚠️ 权重中没有保存模型配置，使用默认的 advanced 或传入的参数")
+            self.model_type = model_type if model_type else 'advanced'
+            input_shape = GuitarRecConfig.INPUT_SHAPE
+            
+        # 根据模型类型动态创建模型
+        if self.model_type == 'advanced':
+            self.model = AdvancedGuitarClassifier(input_shape).to(self.device)
+        elif self.model_type == 'standard':
+            self.model = GuitarClassifier(input_shape).to(self.device)
+        elif self.model_type == 'simplified':
+            self.model = SimplifiedGuitarClassifier(input_shape).to(self.device)
+        else:
+            raise ValueError(f"未知的模型类型: {self.model_type}")
+        
+        # 挂载权重
         self.model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"✅ 模型已从 {model_path} 加载")
+        self.model.eval()
+        
+        print(f"🎸 吉他时间线分析器初始化完成，使用设备: {self.device}, 模型类型: {self.model_type}")
+    
+    def load_model(self, model_path):
+        """兼容性保留，但在 __init__ 中已完成实际加载"""
+        pass
     
     def extract_features(self, audio, sr):
         """提取音频特征"""

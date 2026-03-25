@@ -23,8 +23,8 @@ from src.sep.utils import compute_sdr
 # ---------- 多分辨率STFT损失 ----------
 def multi_resolution_stft_loss(est_wave, target_wave, fft_sizes=[2048, 1024, 512], hop_sizes=None, win_sizes=None):
     """
-    计算多个STFT分辨率的L1损失（实部和虚部之和）
-    返回所有分辨率的平均损失
+    计算多个STFT分辨率的谱收敛损失(Spectral Convergence)、复数L1损失和对数幅度L1损失。
+    V3.0: 既然模型有了相位修正能力，我们重新引入对复数实虚部的损失惩罚，以及波形级别的约束。
     """
     if hop_sizes is None:
         hop_sizes = [fft_size//4 for fft_size in fft_sizes]
@@ -32,7 +32,6 @@ def multi_resolution_stft_loss(est_wave, target_wave, fft_sizes=[2048, 1024, 512
         win_sizes = fft_sizes
     loss = 0.0
     
-    # 强制在FP32下进行STFT计算，防止AMP混合精度下的溢出
     est_wave = est_wave.float()
     target_wave = target_wave.float()
     
@@ -42,8 +41,22 @@ def multi_resolution_stft_loss(est_wave, target_wave, fft_sizes=[2048, 1024, 512
                               win_length=win_size, window=window, return_complex=True)
         target_spec = torch.stft(target_wave.squeeze(1), n_fft=fft_size, hop_length=hop_size,
                                  win_length=win_size, window=window, return_complex=True)
-        loss += torch.mean(torch.abs(est_spec.real - target_spec.real)) + \
-                torch.mean(torch.abs(est_spec.imag - target_spec.imag))
+        
+        est_mag = torch.sqrt(est_spec.real**2 + est_spec.imag**2 + 1e-8)
+        target_mag = torch.sqrt(target_spec.real**2 + target_spec.imag**2 + 1e-8)
+        
+        # 1. 谱收敛损失 (Spectral Convergence)
+        sc_loss = torch.norm(target_mag - est_mag, p="fro") / (torch.norm(target_mag, p="fro") + 1e-8)
+        
+        # 2. 对数幅度损失 (Log Magnitude L1)
+        log_mag_loss = torch.mean(torch.abs(torch.log(est_mag + 1e-7) - torch.log(target_mag + 1e-7)))
+        
+        # 3. 复数实虚部损失 (Complex L1) - 施加相位对齐压力
+        complex_loss = torch.mean(torch.abs(est_spec.real - target_spec.real)) + \
+                       torch.mean(torch.abs(est_spec.imag - target_spec.imag))
+        
+        loss += (sc_loss + log_mag_loss + complex_loss)
+        
     return loss / len(fft_sizes)
 
 def train():
@@ -105,6 +118,17 @@ def train():
     def augment(mix, guitar):
         if not config.use_augmentation:
             return mix, guitar
+            
+        # 1. 批次内的随机混音 (Remixing / Mixup) - 解决数据量匮乏的最强增强
+        # 通过将 batch 内的 mix - guitar 得到其他伴奏，然后随机打乱伴奏与吉他的搭配
+        # 这要求 batch size > 1
+        if mix.size(0) > 1 and random.random() < 0.7:  # 70%概率进行批次内伴奏重组
+            other_instruments = mix - guitar
+            # 将 other_instruments 沿 batch 维度随机滚动（打乱搭配）
+            roll_shift = random.randint(1, mix.size(0) - 1)
+            other_instruments_shuffled = torch.roll(other_instruments, shifts=roll_shift, dims=0)
+            mix = guitar + other_instruments_shuffled  # 重新合并为新的 mix
+
         gain = random.uniform(*config.gain_augment_range)
         mix = mix * gain
         guitar = guitar * gain
@@ -162,9 +186,12 @@ def train():
 
             with torch.amp.autocast('cuda', enabled=config.use_amp):
                 out = model(mix)
+                
+                # 重新加入波形级损失作为细微相位偏移的补充约束
                 loss_l1 = l1_loss(out, guitar)
                 loss_stft = multi_resolution_stft_loss(out, guitar)
-                loss = loss_l1 + 0.5 * loss_stft
+                
+                loss = loss_l1 + loss_stft
 
             if torch.isnan(loss).any():
                 log_message(f"⚠️ Batch {batch_idx} loss is NaN, skipping", also_print=False)
