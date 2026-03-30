@@ -1,9 +1,0 @@
-============================================================
-Training started at 2026-03-25 08:40:33
-============================================================
-Configuration:
-============================================================
-Using device: cuda
-Train samples: 412, Val samples: 45
-Model parameters: 1.97M
-Checkpoint not found at d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\last_checkpoint.pth. Starting from scratch.

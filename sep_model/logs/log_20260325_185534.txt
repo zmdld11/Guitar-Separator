@@ -1,0 +1,165 @@
+============================================================
+Training started at 2026-03-25 18:55:34
+============================================================
+Configuration:
+============================================================
+Using device: cuda
+Train samples: 412, Val samples: 45
+Model parameters: 2.12M
+Checkpoint not found at d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\last_checkpoint.pth. Starting from scratch.
+Epoch 1: Train Loss = 3.0869
+Epoch 1: Val SDR = -8.52 dB
+New best model saved with SDR -8.52
+Epoch 2: Train Loss = 2.8807
+Epoch 2: Val SDR = -8.04 dB
+New best model saved with SDR -8.04
+Epoch 3: Train Loss = 2.9111
+Epoch 3: Val SDR = -7.86 dB
+New best model saved with SDR -7.86
+Epoch 4: Train Loss = 2.9296
+Epoch 4: Val SDR = -7.26 dB
+New best model saved with SDR -7.26
+Epoch 5: Train Loss = 2.8039
+Epoch 5: Val SDR = -6.98 dB
+New best model saved with SDR -6.98
+Epoch 6: Train Loss = 2.8844
+Epoch 6: Val SDR = -7.82 dB
+Epoch 7: Train Loss = 2.8827
+Epoch 7: Val SDR = -7.41 dB
+Epoch 8: Train Loss = 2.8216
+Epoch 8: Val SDR = -6.75 dB
+New best model saved with SDR -6.75
+Epoch 9: Train Loss = 2.7617
+Epoch 9: Val SDR = -8.28 dB
+Epoch 10: Train Loss = 2.7102
+Epoch 10: Val SDR = -7.56 dB
+Checkpoint saved to d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\checkpoint_epoch10.pth
+Epoch 11: Train Loss = 2.8066
+Epoch 11: Val SDR = -6.09 dB
+New best model saved with SDR -6.09
+Epoch 12: Train Loss = 2.6914
+Epoch 12: Val SDR = -6.75 dB
+Epoch 13: Train Loss = 2.7314
+Epoch 13: Val SDR = -6.72 dB
+Epoch 14: Train Loss = 2.7021
+Epoch 14: Val SDR = -5.67 dB
+New best model saved with SDR -5.67
+Epoch 15: Train Loss = 2.6396
+Epoch 15: Val SDR = -5.94 dB
+Epoch 16: Train Loss = 2.6033
+Epoch 16: Val SDR = -5.69 dB
+Epoch 17: Train Loss = 2.6029
+Epoch 17: Val SDR = -6.11 dB
+Epoch 18: Train Loss = 2.5692
+Epoch 18: Val SDR = -6.01 dB
+Epoch 19: Train Loss = 2.5896
+Epoch 19: Val SDR = -5.94 dB
+Epoch 20: Train Loss = 2.6345
+Epoch 20: Val SDR = -5.56 dB
+New best model saved with SDR -5.56
+Checkpoint saved to d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\checkpoint_epoch20.pth
+Epoch 21: Train Loss = 2.5664
+Epoch 21: Val SDR = -5.43 dB
+New best model saved with SDR -5.43
+Epoch 22: Train Loss = 2.5931
+Epoch 22: Val SDR = -5.73 dB
+Epoch 23: Train Loss = 2.5889
+Epoch 23: Val SDR = -5.12 dB
+New best model saved with SDR -5.12
+Epoch 24: Train Loss = 2.5735
+Epoch 24: Val SDR = -5.16 dB
+Epoch 25: Train Loss = 2.5513
+Epoch 25: Val SDR = -4.97 dB
+New best model saved with SDR -4.97
+Epoch 26: Train Loss = 2.5430
+Epoch 26: Val SDR = -5.60 dB
+Epoch 27: Train Loss = 2.5098
+Epoch 27: Val SDR = -5.83 dB
+Epoch 28: Train Loss = 2.5832
+Epoch 28: Val SDR = -6.03 dB
+Epoch 29: Train Loss = 2.5455
+Epoch 29: Val SDR = -5.36 dB
+Epoch 30: Train Loss = 2.5553
+Epoch 30: Val SDR = -5.55 dB
+Checkpoint saved to d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\checkpoint_epoch30.pth
+Epoch 31: Train Loss = 2.5516
+Epoch 31: Val SDR = -4.67 dB
+New best model saved with SDR -4.67
+Epoch 32: Train Loss = 2.4866
+Epoch 32: Val SDR = -6.10 dB
+Epoch 33: Train Loss = 2.4576
+Epoch 33: Val SDR = -5.52 dB
+Epoch 34: Train Loss = 2.4837
+Epoch 34: Val SDR = -5.32 dB
+Epoch 35: Train Loss = 2.5401
+Epoch 35: Val SDR = -5.53 dB
+Epoch 36: Train Loss = 2.5372
+Epoch 36: Val SDR = -4.92 dB
+Epoch 37: Train Loss = 2.4758
+Epoch 37: Val SDR = -5.11 dB
+Epoch 38: Train Loss = 2.4862
+Epoch 38: Val SDR = -5.95 dB
+Epoch 39: Train Loss = 2.4212
+Epoch 39: Val SDR = -5.66 dB
+Epoch 40: Train Loss = 2.5281
+Epoch 40: Val SDR = -4.63 dB
+New best model saved with SDR -4.63
+Checkpoint saved to d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\checkpoint_epoch40.pth
+Epoch 41: Train Loss = 2.4132
+Epoch 41: Val SDR = -5.76 dB
+Epoch 42: Train Loss = 2.4386
+Epoch 42: Val SDR = -4.97 dB
+Epoch 43: Train Loss = 2.4240
+Epoch 43: Val SDR = -5.42 dB
+Epoch 44: Train Loss = 2.4141
+Epoch 44: Val SDR = -4.80 dB
+Epoch 45: Train Loss = 2.4720
+Epoch 45: Val SDR = -5.03 dB
+Epoch 46: Train Loss = 2.4295
+Epoch 46: Val SDR = -5.44 dB
+Epoch 47: Train Loss = 2.4197
+Epoch 47: Val SDR = -5.10 dB
+Epoch 48: Train Loss = 2.4181
+Epoch 48: Val SDR = -5.55 dB
+Epoch 49: Train Loss = 2.4918
+Epoch 49: Val SDR = -5.34 dB
+Epoch 50: Train Loss = 2.4622
+Epoch 50: Val SDR = -5.41 dB
+Checkpoint saved to d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\checkpoint_epoch50.pth
+Epoch 51: Train Loss = 2.5649
+Epoch 51: Val SDR = -5.58 dB
+Epoch 52: Train Loss = 2.4976
+Epoch 52: Val SDR = -6.00 dB
+Epoch 53: Train Loss = 2.5078
+Epoch 53: Val SDR = -4.91 dB
+Epoch 54: Train Loss = 2.6450
+Epoch 54: Val SDR = -5.78 dB
+Epoch 55: Train Loss = 2.6018
+Epoch 55: Val SDR = -5.78 dB
+Epoch 56: Train Loss = 2.5481
+Epoch 56: Val SDR = -5.01 dB
+Epoch 57: Train Loss = 2.5975
+Epoch 57: Val SDR = -5.83 dB
+Epoch 58: Train Loss = 2.5592
+Epoch 58: Val SDR = -5.31 dB
+Epoch 59: Train Loss = 2.5393
+Epoch 59: Val SDR = -5.42 dB
+Epoch 60: Train Loss = 2.6193
+Epoch 60: Val SDR = -5.84 dB
+Checkpoint saved to d:\program_project\4ATS\instrument_separator\sep_model/checkpoints\checkpoint_epoch60.pth
+Epoch 61: Train Loss = 2.5405
+Epoch 61: Val SDR = -5.40 dB
+Epoch 62: Train Loss = 2.4709
+Epoch 62: Val SDR = -5.57 dB
+Epoch 63: Train Loss = 2.5640
+Epoch 63: Val SDR = -4.71 dB
+Epoch 64: Train Loss = 2.5194
+Epoch 64: Val SDR = -5.16 dB
+Epoch 65: Train Loss = 2.5100
+Epoch 65: Val SDR = -4.97 dB
+Epoch 66: Train Loss = 2.5038
+Epoch 66: Val SDR = -5.14 dB
+Epoch 67: Train Loss = 2.5235
+Epoch 67: Val SDR = -5.46 dB
+Epoch 68: Train Loss = 2.5314
+Epoch 68: Val SDR = -4.68 dB

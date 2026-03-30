@@ -1,214 +1,122 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from .config import Config
 from ..common.audio_utils import stft, istft
 
-class SEBlock(nn.Module):
-    """ Squeeze-and-Excitation (SE) 通道注意力机制 """
-    def __init__(self, channels, reduction=4):
+def get_rope_cos_sin(seq_len, head_dim, device):
+    inv_freq = 1.0 / (10000 ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
+    t = torch.arange(seq_len, device=device).type_as(inv_freq)
+    freqs = torch.outer(t, inv_freq)
+    emb = torch.repeat_interleave(freqs, 2, dim=-1)
+    return emb.cos()[None, :, None, :], emb.sin()[None, :, None, :]
+
+def apply_rope(x, cos, sin):
+    x_even = x[..., 0::2]
+    x_odd  = x[..., 1::2]
+    x_rot = torch.stack([-x_odd, x_even], dim=-1).reshape_as(x)
+    return x * cos + x_rot * sin
+
+class RoPEAttention(nn.Module):
+    def __init__(self, dim, num_heads):
         super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channels, channels // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(channels // reduction, channels, bias=False),
-            nn.Sigmoid()
-        )
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.qkv = nn.Linear(dim, dim * 3)
+        self.proj = nn.Linear(dim, dim)
+        
+    def forward(self, x, cos, sin):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.unbind(2)
+        
+        q = apply_rope(q, cos, sin)
+        k = apply_rope(k, cos, sin)
+        
+        attn = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)
+        attn = attn.softmax(dim=-1)
+        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        return self.proj(out)
 
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y.expand_as(x)
-
-class DoubleConv(nn.Module):
-    """ (Conv2D -> BatchNorm -> LeakyReLU) * 2 + SEBlock """
-    def __init__(self, in_channels, out_channels):
+class TransformerLayer(nn.Module):
+    def __init__(self, dim, num_heads):
         super().__init__()
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(0.2, inplace=True)
-        )
-        self.se = SEBlock(out_channels)
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = RoPEAttention(dim, num_heads)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(nn.Linear(dim, dim*4), nn.GELU(), nn.Linear(dim*4, dim))
+        
+    def forward(self, x, cos, sin):
+        x = x + self.attn(self.norm1(x), cos, sin)
+        x = x + self.mlp(self.norm2(x))
+        return x
 
-    def forward(self, x):
-        return self.se(self.double_conv(x))
-
-class TemporalBottleneck(nn.Module):
-    """ 在U-Net最深处用于捕捉长时间上下文的时序膨胀卷积 """
-    def __init__(self, channels):
+class DualPathBlock(nn.Module):
+    def __init__(self, dim, num_heads):
         super().__init__()
-        # 沿时间轴的膨胀，扩大时间感受野以识别吉他延音
-        self.dilated1 = nn.Conv2d(channels, channels, kernel_size=(3, 3), padding=(1, 1), dilation=(1, 1))
-        self.dilated2 = nn.Conv2d(channels, channels, kernel_size=(3, 3), padding=(1, 2), dilation=(1, 2))
-        self.dilated3 = nn.Conv2d(channels, channels, kernel_size=(3, 3), padding=(1, 4), dilation=(1, 4))
-        self.act = nn.LeakyReLU(0.2, inplace=True)
+        self.time_trans = TransformerLayer(dim, num_heads)
+        self.freq_trans = TransformerLayer(dim, num_heads)
+    
+    def forward(self, x, cos_t, sin_t, cos_f, sin_f):
+        B, K, T, D = x.shape
+        x_t = x.permute(0, 1, 2, 3).reshape(B*K, T, D)
+        x_t = self.time_trans(x_t, cos_t, sin_t)
+        x = x_t.reshape(B, K, T, D)
         
-    def forward(self, x):
-        res = x
-        x1 = self.act(self.dilated1(x))
-        x2 = self.act(self.dilated2(x1))
-        x3 = self.act(self.dilated3(x2))
-        return res + x3    
+        x_f = x.permute(0, 2, 1, 3).reshape(B*T, K, D)
+        x_f = self.freq_trans(x_f, cos_f, sin_f)
+        x = x_f.reshape(B, T, K, D).permute(0, 2, 1, 3) 
+        return x
 
-class FrequencySharedBiLSTM(nn.Module):
-    """
-    频带共享双向LSTM：将频率轴和Batch轴融合，让LSTM纯粹沿着时间T轴滑动，
-    以无限长的时间感受野捕捉吉他延音。由于同一层LSTM权重在所有频带上共享，
-    参数量极小，但对时序的理解能力远超普通2D卷积。
-    """
-    def __init__(self, channels, hidden_size=64):
-        super().__init__()
-        self.lstm = nn.LSTM(channels, hidden_size, num_layers=1, bidirectional=True, batch_first=True)
-        self.proj = nn.Conv2d(hidden_size * 2, channels, kernel_size=1)
-        
-    def forward(self, x):
-        # x: (B, C, F, T)
-        B, C, F, T = x.size()
-        
-        # 融合 B 和 F: 这里必须把 T 放在时序维度 -> (B*F, T, C)
-        x_seq = x.permute(0, 2, 3, 1).contiguous().view(B*F, T, C)
-        
-        # LSTM 处理 (batch_first=True, 所以输入形状正是 [B*F, T, input_size])
-        lstm_out, _ = self.lstm(x_seq)
-        
-        # 恢复维度: (B*F, T, 2*H) -> (B, F, T, 2*H) -> (B, 2*H, F, T)
-        lstm_out = lstm_out.view(B, F, T, -1).permute(0, 3, 1, 2).contiguous()
-        
-        # 投影回原通道数并结合残差
-        return x + self.proj(lstm_out)
-
-class Down(nn.Module):
-    """ 下采样：Maxpool -> DoubleConv """
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
-            DoubleConv(in_channels, out_channels)
-        )
-
-    def forward(self, x):
-        return self.maxpool_conv(x)
-
-class Up(nn.Module):
-    """ 上采样：UpSample -> Concat -> DoubleConv """
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.conv = DoubleConv(in_channels, out_channels)
-
-    def forward(self, x1, x2):
-        x1 = self.up(x1)
-        # 对齐尺寸
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
-        x = torch.cat([x2, x1], dim=1)
-        return self.conv(x)
-
-class HTDemucs(nn.Module):
-    """
-    [V4.0 定海神针版] - Frequency-Shared BiLSTM + Phase Correction
-    - 结合了3.0的相位修正能力和无限长时序分析能力。
-    - 引入基于频带共享的BiLSTM，突破2D卷积池化在时间上的局部性，
-      让模型拥有全局视野，彻底看清楚一整首曲子的音符起落。
-    """
+class MiniBSRoFormer(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
+        dim, num_heads, num_blocks = 128, 4, 4
+        self.bounds = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1025]
+        self.num_bands = len(self.bounds) - 1
         
-        c = 16
-        
-        # 输入通道为2:对数幅度 + 归一化初始相位
-        self.inc = DoubleConv(2, c)
-        self.down1 = Down(c, c*2)
-        self.down2 = Down(c*2, c*4)
-        self.down3 = Down(c*4, c*8)
-        self.down4 = Down(c*8, c*16)
-        
-        # 核心增强：时间膨胀模块，加深极低抽象层的时态理解
-        self.bottleneck = TemporalBottleneck(c*16)
-        self.lstm_bottleneck = FrequencySharedBiLSTM(c*16)
-        
-        self.up1 = Up(c*16 + c*8, c*8)
-        self.up2 = Up(c*8 + c*4, c*4)
-        self.up3 = Up(c*4 + c*2, c*2)
-        self.up4 = Up(c*2 + c, c)
-        
-        # 输出通道为2: [幅度mask标量, 相位补偿角度]
-        self.outc = nn.Conv2d(c, 2, kernel_size=1)
+        self.in_projs, self.out_projs = nn.ModuleList(), nn.ModuleList()
+        for i in range(self.num_bands):
+            bw = self.bounds[i+1] - self.bounds[i]
+            self.in_projs.append(nn.Linear(bw * 2, dim))
+            self.out_projs.append(nn.Linear(dim, bw * 2))
+            
+        self.blocks = nn.ModuleList([DualPathBlock(dim, num_heads) for _ in range(num_blocks)])
+        self.dim, self.num_heads = dim, num_heads
 
     def forward(self, waveform):
         input_length = waveform.size(2)
+        spec = stft(waveform, fft_size=self.config.stft_fft_size, hop_length=self.config.stft_hop_length, win_length=self.config.stft_win_length, window=self.config.stft_window, normalized=self.config.stft_normalized)
+        mag = torch.sqrt(spec[:, 0:1]**2 + spec[:, 1:2]**2 + 1e-8)
+        phase_angle = torch.atan2(spec[:, 1:2], spec[:, 0:1])
+        x_in = torch.cat([torch.log1p(mag), phase_angle / torch.pi], dim=1).permute(0, 3, 2, 1)
+        B, F, T, _ = x_in.shape
         
-        # 1. STFT
-        spec = stft(waveform,
-                    fft_size=self.config.stft_fft_size,
-                    hop_length=self.config.stft_hop_length,
-                    win_length=self.config.stft_win_length,
-                    window=self.config.stft_window,
-                    normalized=self.config.stft_normalized)
+        band_features = []
+        for i in range(self.num_bands):
+            low, high = self.bounds[i], self.bounds[i+1]
+            bw = high - low
+            x_band = x_in[:, low:high].permute(0, 2, 1, 3).reshape(B, T, bw * 2)
+            band_features.append(self.in_projs[i](x_band))
+            
+        x = torch.stack(band_features, dim=1)
+        head_dim = self.dim // self.num_heads
+        cos_t, sin_t = get_rope_cos_sin(max(T, 1000), head_dim, x.device)
+        cos_f, sin_f = get_rope_cos_sin(self.num_bands, head_dim, x.device)
+        cos_t, sin_t = cos_t[:, :T], sin_t[:, :T]
+        cos_f, sin_f = cos_f[:, :self.num_bands], sin_f[:, :self.num_bands]
         
-        spec_real = spec[:, 0:1, :, :]
-        spec_imag = spec[:, 1:2, :, :]
-        
-        # 2. 提取幅度谱与初始相位
-        mag = torch.sqrt(spec_real**2 + spec_imag**2 + 1e-8)
-        phase_angle = torch.atan2(spec_imag, spec_real) # 弧度 [-pi, pi]
-        
-        # 压缩幅度和归一化相位给网络
-        mag_compressed = torch.log1p(mag)
-        phase_norm = phase_angle / torch.pi
-        
-        # 将输入组合成 (batch, 2, freq, time)
-        x_in = torch.cat([mag_compressed, phase_norm], dim=1)
-        x = x_in.permute(0, 1, 3, 2)
-        
-        # 3. 穿梭 U-Net
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x4 = self.down3(x3)
-        x5 = self.down4(x4)
-        
-        x5 = self.bottleneck(x5)
-        x5 = self.lstm_bottleneck(x5)
-        
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
-        
-        out = self.outc(x)
-        out = out.permute(0, 1, 3, 2) # (batch, 2, t, freq)
-        
-        # 4. 解析 Mask 和 Phase Delta
-        # 通道 0: Mag Mask -> Sigmoid压缩到 (0, 1) 然后乘以原始幅度
-        mag_mask = torch.sigmoid(out[:, 0:1, :, :])
-        est_mag = mag * mag_mask
-        
-        # 通道 1: Phase Delta -> Tanh乘以PI限制在 (-pi, pi)，加到初始相位上旋转
-        phase_delta = torch.tanh(out[:, 1:2, :, :]) * torch.pi
-        est_phase = phase_angle + phase_delta
-        
-        # 5. 生成新的实部虚部
-        est_real = est_mag * torch.cos(est_phase)
-        est_imag = est_mag * torch.sin(est_phase)
-        est_spec = torch.cat([est_real, est_imag], dim=1)
-        
-        # 6. iSTFT 重构
-        final_wave = istft(est_spec,
-                        fft_size=self.config.stft_fft_size,
-                        hop_length=self.config.stft_hop_length,
-                        win_length=self.config.stft_win_length,
-                        window=self.config.stft_window,
-                        normalized=self.config.stft_normalized,
-                        length=input_length)
-                        
-        return final_wave
+        for block in self.blocks:
+            x = block(x, cos_t, sin_t, cos_f, sin_f)
+            
+        out_bands = []
+        for i in range(self.num_bands):
+            bw = self.bounds[i+1] - self.bounds[i]
+            out_band = self.out_projs[i](x[:, i]).reshape(B, T, bw, 2).permute(0, 3, 1, 2)
+            out_bands.append(out_band)
+            
+        out = torch.cat(out_bands, dim=3)
+        est_mag = mag * torch.sigmoid(out[:, 0:1])
+        est_phase = phase_angle + torch.tanh(out[:, 1:2]) * torch.pi
+        est_spec = torch.cat([est_mag * torch.cos(est_phase), est_mag * torch.sin(est_phase)], dim=1)
+        return istft(est_spec, fft_size=self.config.stft_fft_size, hop_length=self.config.stft_hop_length, win_length=self.config.stft_win_length, window=self.config.stft_window, normalized=self.config.stft_normalized, length=input_length)

@@ -3,7 +3,7 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
-from src.sep.model import HTDemucs
+from src.sep.model import MiniBSRoFormer
 from src.sep.config import Config
 from src.rec.timeline_analyzer import GuitarTimelineAnalyzer
 
@@ -33,8 +33,8 @@ class GuitarSeparator:
         print(f"🎸 正在加载吉他分离模型 (V4.0自动适配架构): {model_path}")
         checkpoint = torch.load(model_path, map_location=self.device)
         
-        # 实例化当前的 HTDemucs
-        model = HTDemucs(self.config).to(self.device)
+        # 实例化当前的 MiniBSRoFormer
+        model = MiniBSRoFormer(self.config).to(self.device)
         
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             state_dict = checkpoint['model_state_dict']

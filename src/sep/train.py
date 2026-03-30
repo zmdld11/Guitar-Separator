@@ -17,7 +17,7 @@ import random
 
 from src.sep.config import Config
 from src.sep.dataset import SepDataset
-from src.sep.model import HTDemucs
+from src.sep.model import MiniBSRoFormer
 from src.sep.utils import compute_sdr
 
 # ---------- 多分辨率STFT损失 ----------
@@ -97,12 +97,14 @@ def train():
     log_message(f'Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}')
 
     # 模型
-    model = HTDemucs(config).to(device)
+    model = MiniBSRoFormer(config).to(device)
     log_message(f'Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M')
 
     # 优化器
     optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=1e-6)
+    
+    # 替换激进的余弦退火，改用保守稳妥的 Plateau，连续不提升就砍半学习率
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, min_lr=1e-6)
 
     # 损失函数
     l1_loss = nn.L1Loss()
@@ -249,7 +251,12 @@ def train():
             val_sdr = -float('inf')
             log_message(f'Epoch {epoch}: No valid SDR values')
 
-        scheduler.step()
+        # 传入当前的评估指标驱动调度器
+        scheduler.step(val_sdr)
+        
+        # 记录当前学习率，便于排查
+        current_lr = optimizer.param_groups[0]['lr']
+        log_message(f'Epoch {epoch}: Learning Rate = {current_lr:.2e}')
 
         if val_sdr > best_val_sdr:
             best_val_sdr = val_sdr
